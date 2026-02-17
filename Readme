@@ -1,0 +1,229 @@
+# Système d'Authentification Sécurisé avec Microservices
+
+## Membres du groupe et répartition
+- **Raphael** : Partie 1 (JWT MAISON) et Partie 4 (ROTATION DES TOKENS)
+- **Davidson** : Partie 2 (RATE LIMITER) et Partie 3 (POW)
+- **Noura** : Partie 5 (MICROSERVICES + PEPPER) et Partie 6 (COMMUNICATION INTERNE)
+
+## Architecture
+
+Ce projet implémente un système d'authentification sécurisé comprenant deux microservices Express :
+
+### Services
+1. **auth-service** (Port 3000 par défaut)
+   - Service d'authentification principal
+   - Génération et validation de JWT
+   - Gestion de la rotation de tokens
+   - Intégration du rate limiter basé sur le token
+   - Validation Proof of Work
+   - Génération de tokens internes pour la communication inter-microservices
+
+2. **data-service** (Port 3001 par défaut)
+   - Service de données protégé
+   - Accepte UNIQUEMENT les tokens internes
+   - Endpoint `/internal/data` sécurisé
+
+## Fonctionnalités Implémentées
+
+### PARTIE 1 - JWT Maison (HMAC SHA256)
+- Création sans dépendance externe
+- Format : `base64(header).base64(payload).signature`
+- Header : `{"alg": "HS256", "typ": "JWT"}`
+- Payload obligatoire : `sub`, `iat`, `exp`, `jti`
+- Signature : `HMAC_SHA256(base64(header) + "." + base64(payload), SECRET + PEPPER_MAIN)`
+- Comparaison de signature sécurisée (timing safe compare)
+
+### PARTIE 2 - Rate Limiter basé sur Token
+- Maximum 10 requêtes par 30 secondes
+- Basé sur le `jti` du token (PAS l'IP)
+- Stockage en mémoire avec cleanup automatique
+- HTTP 429 en cas de dépassement
+
+### PARTIE 3 - Proof of Work
+- Validation par header `X-POW-Nonce`
+- Condition : `SHA256(token + nonce)` doit commencer par "0000"
+- HTTP 403 en cas d'échec
+- Utilitaire pour générer des nonces valides
+
+### PARTIE 4 - Rotation de Tokens
+- Endpoint : `POST /auth/rotate`
+- Invalidation du ancien token (ajout à la blacklist)
+- Génération du nouveau token avec nouveau `jti`
+- Sauvegarde persistante de la blacklist en fichier
+
+### PARTIE 5 - Double Pepper & Microservice
+- Deuxième clé de pepper : `PEPPER_SECONDARY`
+- Signature interne : `HMAC_SHA256(payload, SECRET + PEPPER_SECONDARY)`
+- Tokens internes distincts avec flag `internal: true`
+- Communication sécurisée entre microservices
+
+### PARTIE 6 - Communication Interne
+- Endpoint `/secure-data` dans auth-service
+- Vérifie le token utilisateur
+- Génère un token interne
+- Appelle le data-service
+- Retourne la réponse fusionnée
+
+## Installation
+
+```bash
+npm install
+```
+
+## Configuration
+
+Créer un fichier `.env` avec les variables suivantes :
+
+```env
+SECRET=votre_secret_tres_long_et_securise
+PEPPER_MAIN=votre_pepper_principal
+PEPPER_SECONDARY=votre_pepper_secondaire
+PORT_AUTH=3000
+PORT_DATA=3001
+DATA_SERVICE_URL=http://localhost:3001
+NODE_ENV=development
+```
+
+## Utilisation
+
+### Démarrer les deux services
+```bash
+npm run start:all
+```
+
+### Démarrer uniquement auth-service
+```bash
+npm run start:auth
+```
+
+### Démarrer uniquement data-service
+```bash
+npm run start:data
+```
+
+## Endpoints
+
+### Auth Service (Port 3000)
+
+#### POST /auth/login
+Authentification et obtention de tokens
+```json
+{
+  "userId": "user123"
+}
+```
+Réponse :
+```json
+{
+  "accessToken": "...",
+  "refreshToken": "...",
+  "accessExpiresIn": 300,
+  "refreshExpiresIn": 604800,
+  "jti": "..."
+}
+```
+
+#### POST /auth/rotate
+Rotation du token utilisateur
+Nécessite : `Authorization: Bearer <token>`
+Réponse : nouveau token + nouveau jti
+
+#### POST /auth/refresh
+Rafraîchir le token d'accès
+```json
+{
+  "refreshToken": "..."
+}
+```
+
+#### GET /verify
+Vérifier la validité d'un token
+Nécessite : `Authorization: Bearer <token>`
+
+#### GET /secure-data
+Accès sécurisé aux données via data-service
+Nécessite :
+- `Authorization: Bearer <token_utilisateur>`
+- `X-POW-Nonce: <nonce>`
+
+Génère un token interne et appelle data-service
+
+### Data Service (Port 3001)
+
+#### GET /internal/data
+Endpoint protégé (tokens internes uniquement)
+Nécessite : `X-INTERNAL-TOKEN: <token_interne>`
+Réponse :
+```json
+{
+  "secure": true,
+  "message": "Données sécurisées du microservice",
+  "userId": "...",
+  "jti": "...",
+  "timestamp": "...",
+  "data": {
+    "internalCall": true,
+    "service": "data-service"
+  }
+}
+```
+
+#### GET /health
+Vérifier l'état du service
+
+## Structure du Projet
+
+```
+examen-node-main/
+├── auth-service.js                 # Service principal d'authentification
+├── package.json                    # Dépendances et scripts
+├── .env                           # Variables d'environnement
+├── middlewares/
+│   ├── auth.js                   # Vérification JWT (user)
+│   ├── rateLimiter.js           # Rate limiter basé sur jti
+│   └── pow.js                   # Validation Proof of Work
+├── utils/
+│   └── (peuvent être ajoutés)
+├── data-service/
+│   ├── server.js                 # Service de données
+│   ├── middlewares/
+│   │   └── verifyInternalToken.js # Vérification tokens internes
+│   └── utils/
+│       └── internalToken.js      # Création/vérification tokens internes
+└── Readme                        # Cette documentation
+```
+
+## Concepts de Sécurité
+
+### Timing Safe Compare
+Utilisé pour la comparaison des signatures HMAC afin de prévenir les timing attacks.
+
+### Blacklist de Tokens
+Les tokens invalidés sont stockés dans un fichier `blacklist.json` et rechargés au démarrage.
+
+### Rate Limiting Basé sur Token
+Évite les contournements par changement d'IP et associe les limites au token spécifique.
+
+### Double Pepper
+- `PEPPER_MAIN` : pour les tokens utilisateurs
+- `PEPPER_SECONDARY` : pour les tokens internes (microservice-to-microservice)
+
+### Proof of Work
+Requiert du travail computational pour chaque requête protégée, prévenant les attaques par force brute.
+
+## Logging
+
+Tous les services génèrent des logs en format JSON :
+- `auth.log` pour auth-service
+- `data-service.log` pour data-service
+
+Les logs incluent timestamp, niveau (INFO/WARN/ERROR) et métadonnées pertinentes.
+
+## Gestion des Erreurs
+
+Centralisée avec logging structuré et réponses HTTP appropriées :
+- 400 : Bad Request
+- 401 : Unauthorized (token manquant/invalide)
+- 403 : Forbidden (PoW invalid)
+- 429 : Too Many Requests (rate limit)
+- 500 : Server Error

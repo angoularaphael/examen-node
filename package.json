@@ -1,0 +1,33 @@
+{
+  "name": "examen-node",
+  "version": "1.0.0",
+  "description": "Système d'authentification sécurisé avec JWT maison, rate limiter, proof of work et communication inter-microservices",
+  "main": "index.js",
+  "scripts": {
+    "start": "node auth-service.js",
+    "start:auth": "node auth-service.js",
+    "start:data": "node data-service/server.js",
+    "start:all": "concurrently \"npm run start:auth\" \"npm run start:data\"",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/angoularaphael/examen-node.git"
+  },
+  "keywords": ["jwt", "authentication", "microservices", "security"],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/angoularaphael/examen-node/issues"
+  },
+  "homepage": "https://github.com/angoularaphael/examen-node#readme",
+  "dependencies": {
+    "express": "^4.18.2",
+    "dotenv": "^16.0.3"
+  },
+  "devDependencies": {
+    "concurrently": "^7.0.0"
+  }
+}
+
